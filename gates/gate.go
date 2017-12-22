@@ -47,3 +47,11 @@ type IntGateType interface {
 type SetGateType interface {
 	SetValue() Set
 }
+
+func NewSet(values ...string) Set {
+	s := Set{}
+	for _, v := range values {
+		s[v] = v
+	}
+	return s
+}
