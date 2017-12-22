@@ -18,6 +18,14 @@ type config struct {
 	Collection string `mapstructure:"collection"`
 }
 
+type featureDoc struct {
+	Actors             []string `bson:"actors"`
+	Groups             []string `bson:"groups"`
+	Boolean            bool     `bson:"boolean"`
+	PercentageOfActors int      `bson:"percentage_of_actors"`
+	PercentageOfTime   int      `bson:"percentage_of_time"`
+}
+
 // Driver is a store driver that keeps features and gates in mongoDB.
 type Driver struct {
 	collection *mgo.Collection
@@ -28,12 +36,23 @@ func NewDriver() *Driver {
 	return &Driver{}
 }
 
+// NewDriverWithConnection initializes a new mongoDB driver with a given collection.
+// This factory allows you to reused a collection from a session open in your program.
+func NewDriverWithCollection(c *mgo.Collection) *Driver {
+	return &Driver{c}
+}
+
 // Configure configures the mongodb driver.
 // These are the options for this driver:
 //   - url: string url to the mongoDB cluster (required)
 //   - database: database name (optional - default to the database in the url, or "test" if also empty)
 //   - collection: collection name (optional - default "flipper")
+// This function doesn't do anything if the driver already has a collection configured.
 func (a *Driver) Configure(c map[string]interface{}) error {
+	if a.collection != nil {
+		return nil
+	}
+
 	var conf config
 	if err := mapstructure.Decode(c, &conf); err != nil {
 		return errors.Wrap(err, "error decoding Mongodb's driver configuration")
@@ -111,7 +130,7 @@ func (a *Driver) Disable(feature feature.Feature, gate gates.Gate) error {
 func (a *Driver) Get(feature feature.Feature, keys []gates.GateKey) ([]gates.Gate, error) {
 	var g []gates.Gate
 
-	result := bson.M{}
+	var result featureDoc
 	if err := a.collection.FindId(feature.Name).One(&result); err != nil {
 		if err == mgo.ErrNotFound {
 			return g, nil
@@ -120,48 +139,19 @@ func (a *Driver) Get(feature feature.Feature, keys []gates.GateKey) ([]gates.Gat
 	}
 
 	for _, t := range keys {
-		v, ok := result[string(t)]
-		if !ok {
-			continue
-		}
-
 		switch t {
 		case gates.BoolGateKey:
-			g = append(g, gates.NewBoolGate(ok))
+			g = append(g, gates.NewBoolGate(result.Boolean))
 		case gates.ActorGateKey:
-			gs, ok := v.([]interface{})
-			if !ok {
-				return nil, errors.Errorf("unexpected set value stored: %v", v)
-			}
-			set := gates.Set{}
-			for _, k := range gs {
-				s := k.(string)
-				set[s] = s
-			}
+			set := gates.NewSet(result.Actors...)
 			g = append(g, gates.NewActorGate(set))
 		case gates.GroupGateKey:
-			gs, ok := v.([]interface{})
-			if !ok {
-				return nil, errors.Errorf("unexpected set value stored: %v", v)
-			}
-			set := gates.Set{}
-			for _, k := range gs {
-				s := k.(string)
-				set[s] = s
-			}
+			set := gates.NewSet(result.Groups...)
 			g = append(g, gates.NewGroupGate(set))
 		case gates.PercentageOfActorsGateKey:
-			gi, ok := v.(int)
-			if !ok {
-				return nil, errors.Errorf("unexpected int value: %v", v)
-			}
-			g = append(g, gates.NewPercentageOfActorsGate(gi))
+			g = append(g, gates.NewPercentageOfActorsGate(result.PercentageOfActors))
 		case gates.PercentageOfTimeGateKey:
-			gi, ok := v.(int)
-			if !ok {
-				return nil, errors.Errorf("unexpected int value: %v", v)
-			}
-			g = append(g, gates.NewPercentageOfTimeGate(gi))
+			g = append(g, gates.NewPercentageOfTimeGate(result.PercentageOfTime))
 		default:
 			return nil, errors.Errorf("unsupported gate: %v", t)
 		}

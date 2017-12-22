@@ -1,0 +1,15 @@
+---
+  language: go
+  sudo: false
+  notifications:
+    email: false
+  go:
+    - 1.9
+  services:
+    - mongodb
+  before_script:
+    - sleep 15
+    - mongo flipper_test --eval 'db.createUser({user:"travis",pwd:"test",roles:["readWrite"]});'
+  env:
+    - FLIPPER_MONGODB_URL=mongodb://travis:test@localhost:27017/flipper_test
+  script: go test -v ./...
